@@ -6,7 +6,7 @@ Unlike [Anthropic's Claude Code for Slack](https://code.claude.com/docs/en/slack
 
 ## 🎯 Why This Exists
 
-**The problem with per-user AI tools:**
+**The problem with per-user AI tools / Claude Code for Slack:**
 - PM reports a bug → needs Claude Pro ($20/mo)
 - Dev wants to add context → needs their own session
 - Designer attaches a screenshot → can't contribute to the same thread
