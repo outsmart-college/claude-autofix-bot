@@ -1,0 +1,54 @@
+{
+  "name": "claude-autofix-bot",
+  "version": "2.0.0",
+  "description": "Automated code fixing via Slack → Claude Agent → Git PR → Deploy",
+  "type": "module",
+  "main": "dist/src/server.js",
+  "scripts": {
+    "start": "node dist/src/server.js",
+    "dev": "tsx watch src/server.ts",
+    "dev:vercel": "vercel dev",
+    "build": "tsc",
+    "type-check": "tsc --noEmit",
+    "lint": "eslint src api --ext .ts",
+    "test": "vitest",
+    "deploy:vercel": "vercel --prod",
+    "postinstall": "npm run build"
+  },
+  "keywords": [
+    "slack",
+    "claude",
+    "automation",
+    "ci-cd",
+    "ai",
+    "devops"
+  ],
+  "author": "Matt Kilmer",
+  "license": "MIT",
+  "dependencies": {
+    "@anthropic-ai/claude-code": "^1.0.0",
+    "@anthropic-ai/claude-agent-sdk": "^0.1.7",
+    "@anthropic-ai/sdk": "^0.32.1",
+    "@octokit/rest": "^21.0.2",
+    "@slack/web-api": "^7.8.0",
+    "@vercel/node": "^3.2.17",
+    "dotenv": "^16.4.7",
+    "express": "^5.2.1",
+    "simple-git": "^3.27.0",
+    "zod": "^3.24.1"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.6",
+    "@types/node": "^20.17.6",
+    "@typescript-eslint/eslint-plugin": "^8.18.1",
+    "@typescript-eslint/parser": "^8.18.1",
+    "eslint": "^9.17.0",
+    "tsx": "^4.21.0",
+    "typescript": "^5.7.2",
+    "vercel": "^39.2.0",
+    "vitest": "^2.1.8"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  }
+}
