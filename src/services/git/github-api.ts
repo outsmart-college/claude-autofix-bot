@@ -262,17 +262,17 @@ ${filesChanged.map((file) => `- \`${file}\``).join('\n')}
   }
 
   /**
-   * Get the Vercel preview URL from PR comments
+   * Get a preview deployment URL from PR comments
    *
-   * Vercel's GitHub integration automatically posts a comment with the preview URL.
-   * This method polls PR comments to find and extract that URL.
+   * Polls PR comments for preview URLs posted by deployment bots.
+   * Supports: Vercel, Cloudflare Pages, and GitHub Actions bot comments.
    *
    * @param prNumber - The PR number to check
    * @param maxWaitMinutes - Maximum time to wait for the comment (default: 5 minutes)
    * @param repoOwner - Optional: override owner (for cross-repo lookups)
    * @param repoName - Optional: override repo (for cross-repo lookups)
    */
-  async getVercelPreviewUrlFromComments(
+  async getPreviewUrlFromComments(
     prNumber: number,
     maxWaitMinutes: number = 5,
     repoOwner?: string,
@@ -283,14 +283,14 @@ ${filesChanged.map((file) => `- \`${file}\``).join('\n')}
     const maxAttempts = (maxWaitMinutes * 60) / 15; // Check every 15 seconds
     let attempts = 0;
 
-    logger.info('🔍 Waiting for Vercel preview URL in PR comments', {
+    logger.info('🔍 Waiting for preview URL in PR comments', {
       owner,
       repo,
       prNumber,
       maxWait: `${maxWaitMinutes}min`,
     });
 
-    // Give Vercel a few seconds to start the deployment
+    // Give the deployment a few seconds to start
     await this.sleep(10000); // 10 seconds initial wait
 
     while (attempts < maxAttempts) {
@@ -304,38 +304,81 @@ ${filesChanged.map((file) => `- \`${file}\``).join('\n')}
           per_page: 50,
         });
 
-        // Look for Vercel bot comment with preview URL
-        // Vercel comments typically come from 'vercel[bot]' or 'vercel'
-        // and contain URLs like: https://project-name-xxx.vercel.app
         for (const comment of comments.data) {
-          const isVercelBot =
-            comment.user?.login === 'vercel[bot]' ||
-            comment.user?.login === 'vercel' ||
-            comment.user?.type === 'Bot';
-
-          if (!isVercelBot) continue;
+          // Only check bot comments
+          if (comment.user?.type !== 'Bot') continue;
 
           const body = comment.body || '';
 
-          // Extract Vercel preview URL from comment body
-          // Common patterns:
-          // - "Preview: https://xxx.vercel.app"
-          // - "Visit Preview: https://xxx.vercel.app"
-          // - Table row with vercel.app link
-          const vercelUrlMatch = body.match(/https:\/\/[a-zA-Z0-9-]+(?:-[a-zA-Z0-9]+)*\.vercel\.app/);
-
-          if (vercelUrlMatch) {
-            const previewUrl = vercelUrlMatch[0];
-            logger.success('Found Vercel preview URL in PR comments', {
+          // Cloudflare Pages: *.pages.dev URLs
+          const cloudflareMatch = body.match(/https:\/\/[a-zA-Z0-9-]+\.[a-zA-Z0-9-]+\.pages\.dev/);
+          if (cloudflareMatch) {
+            logger.success('Found Cloudflare Pages preview URL', {
               prNumber,
-              previewUrl,
+              previewUrl: cloudflareMatch[0],
               attempt: attempts,
             });
-            return previewUrl;
+            return cloudflareMatch[0];
+          }
+
+          // Vercel: *.vercel.app URLs
+          const vercelMatch = body.match(/https:\/\/[a-zA-Z0-9-]+(?:-[a-zA-Z0-9]+)*\.vercel\.app/);
+          if (vercelMatch) {
+            logger.success('Found Vercel preview URL', {
+              prNumber,
+              previewUrl: vercelMatch[0],
+              attempt: attempts,
+            });
+            return vercelMatch[0];
+          }
+
+          // GitHub Actions "Web Preview Ready" comment with any URL
+          if (body.includes('Web Preview Ready')) {
+            const urlMatch = body.match(/https:\/\/[^\s|)]+\.pages\.dev[^\s|)]*/);
+            if (urlMatch) {
+              logger.success('Found web preview URL from GitHub Actions', {
+                prNumber,
+                previewUrl: urlMatch[0],
+                attempt: attempts,
+              });
+              return urlMatch[0];
+            }
           }
         }
 
-        logger.debug('Vercel preview URL not found yet, waiting...', {
+        // Fallback: check GitHub deployment statuses
+        try {
+          const deployments = await this.octokit.repos.listDeployments({
+            owner,
+            repo,
+            ref: `refs/pull/${prNumber}/head`,
+            per_page: 10,
+          });
+
+          for (const deployment of deployments.data) {
+            const statuses = await this.octokit.repos.listDeploymentStatuses({
+              owner,
+              repo,
+              deployment_id: deployment.id,
+              per_page: 5,
+            });
+
+            for (const status of statuses.data) {
+              if (status.state === 'success' && status.environment_url) {
+                logger.success('Found preview URL from deployment status', {
+                  prNumber,
+                  previewUrl: status.environment_url,
+                  attempt: attempts,
+                });
+                return status.environment_url;
+              }
+            }
+          }
+        } catch {
+          // Deployment status check is best-effort
+        }
+
+        logger.debug('Preview URL not found yet, waiting...', {
           attempt: attempts,
           commentsChecked: comments.data.length,
         });
@@ -350,11 +393,23 @@ ${filesChanged.map((file) => `- \`${file}\``).join('\n')}
       await this.sleep(15000); // 15 seconds
     }
 
-    logger.warn('Vercel preview URL not found in PR comments after max wait time', {
+    logger.warn('Preview URL not found in PR comments after max wait time', {
       prNumber,
       attempts,
     });
     return null;
+  }
+
+  /**
+   * @deprecated Use getPreviewUrlFromComments instead
+   */
+  async getVercelPreviewUrlFromComments(
+    prNumber: number,
+    maxWaitMinutes: number = 5,
+    repoOwner?: string,
+    repoName?: string
+  ): Promise<string | null> {
+    return this.getPreviewUrlFromComments(prNumber, maxWaitMinutes, repoOwner, repoName);
   }
 
   /**

@@ -567,21 +567,21 @@ Please make the requested changes on the existing branch. The changes will be co
     await slackService.updateMessage(
       channel,
       statusMessageTs,
-      `🚀 *Deploying to preview...*\n\n` +
+      `🚀 *Deploying preview...*\n\n` +
       `${prStatusText}\n` +
       `📝 PR: ${finalPrUrl}\n\n` +
-      `⏳ Waiting for Vercel to deploy preview (this may take 2-5 minutes)...`
+      `⏳ Waiting for preview deployment (this may take 2-5 minutes)...`
     );
 
-    // Try Vercel API first, then fall back to GitHub PR comments
+    // Try Vercel API first, then fall back to GitHub PR comments for any preview URL
     let deployment = await vercelDeploymentService.waitForDeployment(branchName, 5);
 
     // If Vercel API returned placeholder URL (credentials not configured),
-    // try to get the actual preview URL from GitHub PR comments
+    // try to get the actual preview URL from GitHub PR comments (supports Vercel, Cloudflare Pages, etc.)
     if (deployment.success && deployment.url === 'https://vercel-auto-deploy.example.com' && finalPrNumber) {
       logger.info('Vercel API not configured, checking PR comments for preview URL...');
 
-      const previewUrl = await githubAPIService.getVercelPreviewUrlFromComments(finalPrNumber, 5);
+      const previewUrl = await githubAPIService.getPreviewUrlFromComments(finalPrNumber, 5);
 
       if (previewUrl) {
         deployment = {
@@ -593,7 +593,7 @@ Please make the requested changes on the existing branch. The changes will be co
         // No preview URL found in comments either
         deployment = {
           success: false,
-          error: 'Preview URL not found in Vercel API or PR comments',
+          error: 'Preview URL not found in PR comments or deployment statuses',
         };
       }
     }
