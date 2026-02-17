@@ -253,24 +253,11 @@ app.post('/api/slack-events', async (req: Request, res: Response) => {
     const isThreadReply = !!(thread_ts && thread_ts !== ts);
     const threadKey = thread_ts || ts;
 
-    // For thread replies: only process if it's a follow-up to a completed thread
-    // This allows team members to give additional instructions after the PR is created
+    // Only process original top-level messages, ignore all thread replies
     if (isThreadReply) {
-      // Ignore if this thread is currently being processed (avoid interference)
-      if (activeThreads.has(threadKey)) {
-        logger.debug('Thread is currently being processed, ignoring reply', { threadKey });
-        res.status(200).json({ ok: true });
-        return;
-      }
-
-      // Only process replies to threads we've worked on before
-      if (!completedThreads.has(threadKey)) {
-        logger.debug('Thread reply to unknown thread, ignoring', { threadKey });
-        res.status(200).json({ ok: true });
-        return;
-      }
-
-      logger.info('Processing follow-up instruction in completed thread', { threadKey, user });
+      logger.debug('Ignoring thread reply, only processing original posts', { threadKey });
+      res.status(200).json({ ok: true });
+      return;
     } else {
       // For new top-level messages: check if we already have an active job
       if (activeThreads.has(threadKey)) {
