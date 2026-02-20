@@ -253,12 +253,22 @@ app.post('/api/slack-events', async (req: Request, res: Response) => {
     const isThreadReply = !!(thread_ts && thread_ts !== ts);
     const threadKey = thread_ts || ts;
 
-    // Only process original top-level messages, ignore all thread replies
-    if (isThreadReply) {
-      logger.debug('Ignoring thread reply, only processing original posts', { threadKey });
+    // Detect if the bot was explicitly @mentioned
+    const botUserId = config.slack.botUserId;
+    const botMentionPattern = botUserId ? `<@${botUserId}>` : null;
+    const isBotMentioned = botMentionPattern ? (text || '').includes(botMentionPattern) : false;
+
+    // DUAL TRIGGER LOGIC:
+    // 1. Top-level messages (no thread_ts) in monitored channel → auto-trigger
+    // 2. @claude-autofix-bot mention anywhere (including threads) → on-demand trigger
+    if (isThreadReply && !isBotMentioned) {
+      // Thread reply WITHOUT @mention → ignore
+      logger.debug('Ignoring thread reply (no bot mention)', { threadKey });
       res.status(200).json({ ok: true });
       return;
-    } else {
+    }
+
+    if (!isThreadReply) {
       // For new top-level messages: check if we already have an active job
       if (activeThreads.has(threadKey)) {
         logger.debug('Thread already has active processing', { threadKey });
@@ -277,17 +287,24 @@ app.post('/api/slack-events', async (req: Request, res: Response) => {
       return;
     }
 
+    // Strip the bot @mention from the text so Claude gets a clean prompt
+    let trimmedText = (text || '').trim();
+    if (isBotMentioned && botMentionPattern) {
+      trimmedText = trimmedText.replace(botMentionPattern, '').trim();
+    }
+
     // Ignore very short messages
-    const trimmedText = (text || '').trim();
     if (trimmedText.length < 10) {
       logger.debug('Message too short to process', { length: trimmedText.length });
       res.status(200).json({ ok: true });
       return;
     }
 
-    // Ignore @mentions (handled separately) - but allow in thread replies
-    if (!isThreadReply && trimmedText.includes('<@U')) {
-      logger.debug('Ignoring @mention in top-level message');
+    // For top-level messages: ignore @mentions to OTHER users/bots (not our bot)
+    // This prevents triggering on messages like "@someone please fix this"
+    // But if our bot was mentioned, we already stripped it above so this won't block it
+    if (!isThreadReply && !isBotMentioned && trimmedText.includes('<@U')) {
+      logger.debug('Ignoring top-level message with @mention to other user');
       res.status(200).json({ ok: true });
       return;
     }
@@ -322,8 +339,10 @@ app.post('/api/slack-events', async (req: Request, res: Response) => {
     }
 
     // Create Job for Async Processing
-    // For follow-ups, include the thread context so we can continue on the same branch
+    // For @mention triggered thread replies, check for existing thread context (follow-up on same branch/PR)
+    // For new top-level messages, no thread context exists yet
     const existingThreadContext = isThreadReply ? getThreadContext(threadKey) : undefined;
+    const isFollowUp = isThreadReply && !!existingThreadContext;
 
     const job: IssueJob = {
       id: ts,
@@ -333,7 +352,7 @@ app.post('/api/slack-events', async (req: Request, res: Response) => {
       userId: user,
       timestamp: new Date(),
       retryCount: 0,
-      isFollowUp: isThreadReply,
+      isFollowUp,
       prReferences: prReferences.length > 0 ? prReferences : undefined,
       images: imageAttachments.length > 0 ? imageAttachments : undefined,
       threadContext: existingThreadContext,
@@ -346,10 +365,16 @@ app.post('/api/slack-events', async (req: Request, res: Response) => {
     processedMessages.add(ts);
     activeThreads.add(job.threadTs);
 
+    // Determine trigger type for logging
+    const triggerType = isBotMentioned
+      ? (isThreadReply ? 'mention-in-thread' : 'mention-top-level')
+      : 'auto-top-level';
+
     logger.success('Job enqueued successfully', {
       jobId: job.id,
       queueLength: jobQueue.getQueueLength(),
-      isFollowUp: isThreadReply,
+      triggerType,
+      isFollowUp,
       prReferences: prReferences.length > 0 ? prReferences.map((r: PRReference) => `${r.owner}/${r.repo}#${r.prNumber}`) : undefined,
       images: imageAttachments.length > 0 ? imageAttachments.length : undefined,
       preview: trimmedText.substring(0, 100),

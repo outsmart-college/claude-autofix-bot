@@ -183,6 +183,7 @@ export interface Config {
     botToken: string;
     signingSecret: string;
     channelId: string;
+    botUserId?: string;
   };
   claude: {
     apiKey: string;

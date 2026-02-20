@@ -17,6 +17,9 @@ const ConfigSchema = z.object({
     channelId: z.string().startsWith('C', {
       message: 'Slack channel ID must start with C. Right-click channel → View details.',
     }),
+    botUserId: z.string().startsWith('U', {
+      message: 'Slack bot user ID must start with U. Find it in the bot\'s app profile.',
+    }).optional(),
   }),
   claude: z.object({
     apiKey: z.string().startsWith('sk-ant-', {
@@ -61,6 +64,7 @@ function loadConfig(): Config {
       botToken: process.env.SLACK_BOT_TOKEN || '',
       signingSecret: process.env.SLACK_SIGNING_SECRET || '',
       channelId: process.env.SLACK_CHANNEL_ID || '',
+      botUserId: process.env.SLACK_BOT_USER_ID || undefined,
     },
     claude: {
       apiKey: process.env.ANTHROPIC_API_KEY || '',
