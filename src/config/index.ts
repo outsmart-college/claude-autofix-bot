@@ -64,7 +64,7 @@ function loadConfig(): Config {
       botToken: process.env.SLACK_BOT_TOKEN || '',
       signingSecret: process.env.SLACK_SIGNING_SECRET || '',
       channelId: process.env.SLACK_CHANNEL_ID || '',
-      botUserId: process.env.SLACK_BOT_USER_ID || undefined,
+      botUserId: process.env.SLACK_BOT_USER_ID || 'U0AFL91910Q', // claude-autofix-bot Slack user ID
     },
     claude: {
       apiKey: process.env.ANTHROPIC_API_KEY || '',
