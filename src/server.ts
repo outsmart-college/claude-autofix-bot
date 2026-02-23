@@ -213,12 +213,16 @@ app.post('/api/slack-events', async (req: Request, res: Response) => {
 
     // Filter Out Unwanted Messages
 
-    // Only process regular message events (not message_changed, message_deleted, etc.)
-    if (eventType !== 'message') {
+    // Process message events AND app_mention events
+    // app_mention fires when someone @mentions the bot directly
+    if (eventType !== 'message' && eventType !== 'app_mention') {
       logger.debug('Ignoring non-message event', { eventType });
       res.status(200).json({ ok: true });
       return;
     }
+
+    // If this is an app_mention event, treat it as if the bot was mentioned
+    const isAppMentionEvent = eventType === 'app_mention';
 
     // Ignore most message subtypes (bot_message, message_changed, message_deleted, etc.)
     // BUT allow file_share - this is how Slack sends messages with attached images
@@ -254,9 +258,10 @@ app.post('/api/slack-events', async (req: Request, res: Response) => {
     const threadKey = thread_ts || ts;
 
     // Detect if the bot was explicitly @mentioned
+    // app_mention events always mean the bot was mentioned
     const botUserId = config.slack.botUserId;
     const botMentionPattern = botUserId ? `<@${botUserId}>` : null;
-    const isBotMentioned = botMentionPattern ? (text || '').includes(botMentionPattern) : false;
+    const isBotMentioned = isAppMentionEvent || (botMentionPattern ? (text || '').includes(botMentionPattern) : false);
 
     // DUAL TRIGGER LOGIC:
     // 1. Top-level messages (no thread_ts) in monitored channel → auto-trigger
