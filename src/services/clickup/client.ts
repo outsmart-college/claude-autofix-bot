@@ -42,6 +42,11 @@ class ClickUpService {
     slackPermalink: string;
     severity: 'normal' | 'high' | 'low';
   }): Promise<ClickUpTicket | null> {
+    if (!config.clickup.apiKey) {
+      logger.info('ClickUp API key not configured — skipping ticket creation');
+      return null;
+    }
+
     try {
       const { summary, slackText, reporterName, slackPermalink, severity } = params;
 
@@ -97,6 +102,8 @@ class ClickUpService {
    * Append a PR link to an existing ClickUp task description.
    */
   async appendPRLink(taskId: string, prUrl: string): Promise<void> {
+    if (!config.clickup.apiKey) return;
+
     try {
       // Fetch current description
       const getResp = await fetch(`${this.baseUrl}/task/${taskId}`, {
@@ -139,6 +146,8 @@ class ClickUpService {
    * Mark autofix as failed on the ClickUp ticket.
    */
   async markAutofixFailed(taskId: string, errorMessage: string): Promise<void> {
+    if (!config.clickup.apiKey) return;
+
     try {
       const getResp = await fetch(`${this.baseUrl}/task/${taskId}`, {
         method: 'GET',

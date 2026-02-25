@@ -49,12 +49,8 @@ const ConfigSchema = z.object({
     localRepoPath: z.string().optional(),
   }),
   clickup: z.object({
-    apiKey: z.string().min(1, {
-      message: 'ClickUp API key is required. Get it from ClickUp Settings → Apps.',
-    }),
-    listId: z.string().min(1, {
-      message: 'ClickUp list ID is required. This is the Bugs list where tickets will be created.',
-    }),
+    apiKey: z.string().default(''),
+    listId: z.string().default('901324441486'),
   }),
   deployment: z.object({
     vercelToken: z.string().optional(),
