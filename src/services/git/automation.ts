@@ -2,6 +2,7 @@ import { simpleGit, SimpleGit, SimpleGitOptions } from 'simple-git';
 import { config } from '../../config/index.js';
 import { logger } from '../../utils/logger.js';
 import { GitBranchResult, GitCommitResult, BranchOptions } from '../../types/index.js';
+import type { ClickUpTicket } from '../clickup/client.js';
 import fs from 'fs/promises';
 import path from 'path';
 import os from 'os';
@@ -145,14 +146,14 @@ class GitAutomationService {
    * - feat/description-of-feature
    * - refactor/description-of-refactor
    */
-  async createBranch(options: BranchOptions): Promise<GitBranchResult> {
+  async createBranch(options: BranchOptions, clickupTicket?: ClickUpTicket | null): Promise<GitBranchResult> {
     if (!this.git) {
       throw new Error('Git not initialized. Call initializeRepo() first.');
     }
 
     try {
       // Generate branch name
-      const branchName = this.generateBranchName(options);
+      const branchName = this.generateBranchName(options, clickupTicket);
 
       logger.info('🌿 Creating new branch', { branchName });
 
@@ -195,7 +196,7 @@ class GitAutomationService {
    * Generate a branch name from description
    * Format: type/concise-description (e.g., feat/add-payment-methods)
    */
-  private generateBranchName(options: BranchOptions): string {
+  private generateBranchName(options: BranchOptions, clickupTicket?: ClickUpTicket | null): string {
     const prefix = options.type;
     // Clean up description: remove common prefixes, lowercase, replace spaces with hyphens
     const sanitized = options.description
@@ -214,6 +215,12 @@ class GitAutomationService {
       .substring(0, 40)
       // Clean up trailing partial words
       .replace(/-[^-]*$/, (match) => match.length < 4 ? '' : match);
+
+    // Include ClickUp task ID in branch name for automatic linking
+    // Format: fix/CU-abc123-description
+    if (clickupTicket?.id) {
+      return `${prefix}/CU-${clickupTicket.id}-${sanitized}`;
+    }
 
     return `${prefix}/${sanitized}`;
   }

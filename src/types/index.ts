@@ -200,6 +200,10 @@ export interface Config {
     baseBranch: string;
     localRepoPath?: string;
   };
+  clickup: {
+    apiKey: string;
+    listId: string;
+  };
   deployment: {
     vercelToken?: string;
     vercelProjectId?: string;

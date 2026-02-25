@@ -48,6 +48,14 @@ const ConfigSchema = z.object({
     baseBranch: z.string().default('main'),
     localRepoPath: z.string().optional(),
   }),
+  clickup: z.object({
+    apiKey: z.string().min(1, {
+      message: 'ClickUp API key is required. Get it from ClickUp Settings → Apps.',
+    }),
+    listId: z.string().min(1, {
+      message: 'ClickUp list ID is required. This is the Bugs list where tickets will be created.',
+    }),
+  }),
   deployment: z.object({
     vercelToken: z.string().optional(),
     vercelProjectId: z.string().optional(),
@@ -80,6 +88,10 @@ function loadConfig(): Config {
       targetRepoUrl: process.env.TARGET_REPO_URL || '',
       baseBranch: process.env.BASE_BRANCH || 'main',
       localRepoPath: process.env.LOCAL_REPO_PATH,
+    },
+    clickup: {
+      apiKey: process.env.CLICKUP_API_KEY || '',
+      listId: process.env.CLICKUP_LIST_ID || '901324441486',
     },
     deployment: {
       vercelToken: process.env.VERCEL_TOKEN,

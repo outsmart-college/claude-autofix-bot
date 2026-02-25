@@ -8,6 +8,7 @@ import { githubAPIService, PRDetails } from '../services/git/github-api.js';
 import { vercelDeploymentService } from '../services/deployment/vercel.js';
 import { config } from '../config/index.js';
 import { markThreadCompleted, clearActiveThread } from '../utils/thread-tracking.js';
+import { clickupService, type ClickUpTicket } from '../services/clickup/client.js';
 
 /**
  * Main issue processor - orchestrates the entire fix pipeline
@@ -31,6 +32,7 @@ export async function processIssue(job: IssueJob): Promise<JobResult> {
   let prNumber: number | undefined;
   let lastProgressUpdate = Date.now();
   const PROGRESS_UPDATE_INTERVAL = 3000; // Update Slack every 3 seconds max
+  let clickupTicket: ClickUpTicket | null = null;
 
   // If this is a follow-up with context, reuse the existing branch/PR
   if (isFollowUp && threadContext) {
@@ -64,7 +66,45 @@ export async function processIssue(job: IssueJob): Promise<JobResult> {
     statusMessageTs = statusMsg.ts;
 
     // ============================================
-    // STEP 1.5: Fetch PR Context (if references found)
+    // STEP 1.5: Create ClickUp Ticket (before any git work)
+    // ============================================
+    if (!isFollowUp) {
+      logger.info('📋 Creating ClickUp ticket...');
+      const slackPermalink = `https://slack.com/archives/${channel}/p${threadTs.replace('.', '')}`;
+
+      // Determine severity from text
+      const lowerText = text.toLowerCase();
+      const severity: 'high' | 'low' | 'normal' =
+        (lowerText.includes('data loss') || lowerText.includes('security') || lowerText.includes('completely broken') || lowerText.includes('blocking'))
+          ? 'high'
+          : (lowerText.includes('cosmetic') || lowerText.includes('edge case') || lowerText.includes('minor'))
+            ? 'low'
+            : 'normal';
+
+      // Use first line of text as summary (clean it up)
+      const summary = text.split(/[\r\n]/)[0]
+        .replace(/[^\w\s\-.,!?'"()]/g, '')
+        .replace(/\s+/g, ' ')
+        .trim()
+        .substring(0, 80) || 'Bug report from Slack';
+
+      clickupTicket = await clickupService.createBugTicket({
+        summary,
+        slackText: text,
+        reporterName: userId ? `<@${userId}>` : 'Unknown',
+        slackPermalink,
+        severity,
+      });
+
+      if (clickupTicket) {
+        logger.info('ClickUp ticket created', { id: clickupTicket.id, url: clickupTicket.url });
+      } else {
+        logger.warn('ClickUp ticket creation failed — continuing without it');
+      }
+    }
+
+    // ============================================
+    // STEP 1.75: Fetch PR Context (if references found)
     // ============================================
     let prContext: PRDetails[] = [];
     if (job.prReferences && job.prReferences.length > 0) {
@@ -302,6 +342,11 @@ Please make the requested changes on the existing branch. The changes will be co
         `Please try rephrasing your request or providing more details.`
       );
 
+      // Mark ClickUp ticket as failed (non-blocking)
+      if (clickupTicket?.id) {
+        clickupService.markAutofixFailed(clickupTicket.id, agentResult.error || 'Agent failed').catch(() => {});
+      }
+
       // Clear the active thread state so the thread can be retried
       clearActiveThread(threadTs);
 
@@ -391,7 +436,7 @@ Please make the requested changes on the existing branch. The changes will be co
         description: text.substring(0, 50),
       };
 
-      const branchResult = await gitAutomationService.createBranch(branchOptions);
+      const branchResult = await gitAutomationService.createBranch(branchOptions, clickupTicket);
 
       if (!branchResult.success || !branchResult.branchName) {
         await slackService.updateMessage(
@@ -438,7 +483,7 @@ Please make the requested changes on the existing branch. The changes will be co
 
     // Extract a concise solution summary from agent's analysis
     const solutionSummary = extractSolutionSummary(agentResult.analysis);
-    const commitMessage = generateCommitMessage(text, solutionSummary, filesChanged);
+    const commitMessage = generateCommitMessage(text, solutionSummary, filesChanged, clickupTicket?.id);
     const commitResult = await gitAutomationService.commitChanges(commitMessage, filesChanged);
 
     if (!commitResult.success) {
@@ -521,7 +566,7 @@ Please make the requested changes on the existing branch. The changes will be co
       );
 
       const branchType = determineBranchType(text);
-      const prTitle = generatePRTitle(text, branchType, filesChanged);
+      const prTitle = generatePRTitle(text, branchType, filesChanged, clickupTicket?.id);
       const prBody = formatPRDescription(agentResult, filesChanged);
 
       const prResult = await githubAPIService.createPullRequest(
@@ -554,6 +599,15 @@ Please make the requested changes on the existing branch. The changes will be co
       // Add automatic labels
       if (prResult.prNumber) {
         await githubAPIService.addLabels(prResult.prNumber, ['automated', 'claude-agent']);
+      }
+
+      // Update ClickUp ticket with PR link (non-blocking)
+      if (clickupTicket?.id && prResult.prUrl) {
+        clickupService.appendPRLink(clickupTicket.id, prResult.prUrl).catch((err) => {
+          logger.warn('Failed to update ClickUp with PR link', {
+            error: err instanceof Error ? err.message : String(err),
+          });
+        });
       }
     }
 
@@ -622,6 +676,7 @@ Please make the requested changes on the existing branch. The changes will be co
         userId,
         commandsRun: agentResult.commandsRun,
         isFollowUp: !!isFollowUp,
+        clickupUrl: clickupTicket?.url,
       });
 
       await slackService.updateMessage(channel, statusMessageTs, successMessage);
@@ -663,6 +718,7 @@ Please make the requested changes on the existing branch. The changes will be co
         filesChanged,
         stats,
         deploymentError: deployment.error,
+        clickupUrl: clickupTicket?.url,
       });
 
       await slackService.updateMessage(channel, statusMessageTs, partialSuccessMessage);
@@ -692,6 +748,14 @@ Please make the requested changes on the existing branch. The changes will be co
       error: error instanceof Error ? error.message : String(error),
       stack: error instanceof Error ? error.stack : undefined,
     });
+
+    // Mark ClickUp ticket as failed (non-blocking)
+    if (clickupTicket?.id) {
+      clickupService.markAutofixFailed(
+        clickupTicket.id,
+        error instanceof Error ? error.message : String(error),
+      ).catch(() => {});
+    }
 
     // Clear the active thread state so the thread can be retried
     clearActiveThread(threadTs);
@@ -770,15 +834,18 @@ function extractSolutionSummary(analysis: string): string {
 
 /**
  * Generate commit message
+ * Includes CU-{taskId} for ClickUp auto-linking when available
  */
 function generateCommitMessage(
   issueText: string,
   solution: string,
-  filesChanged: string[]
+  filesChanged: string[],
+  clickupTaskId?: string | null,
 ): string {
   const preview = issueText.substring(0, 50) + (issueText.length > 50 ? '...' : '');
+  const cuPrefix = clickupTaskId ? `CU-${clickupTaskId} ` : '';
 
-  return `🤖 Auto-fix: ${preview}
+  return `${cuPrefix}🤖 Auto-fix: ${preview}
 
 ${solution}
 
@@ -792,9 +859,10 @@ Co-authored-by: Claude <noreply@anthropic.com>`;
 
 /**
  * Generate PR title following conventional commit format
- * Format: type: [scope] description
+ * Format: CU-{taskId} type: [scope] description
+ * Includes CU-{taskId} for ClickUp auto-linking when available
  */
-function generatePRTitle(issueText: string, type: string, filesChanged: string[]): string {
+function generatePRTitle(issueText: string, type: string, filesChanged: string[], clickupTaskId?: string | null): string {
   // Determine scope based on file paths
   let scope = 'general';
 
@@ -850,7 +918,10 @@ function generatePRTitle(issueText: string, type: string, filesChanged: string[]
     ? cleanText
     : `automated fix for ${filesChanged.length} file(s)`;
 
-  return `${commitType}: [${scope}] ${finalText}`;
+  // Include ClickUp task ID for auto-linking
+  const cuPrefix = clickupTaskId ? `CU-${clickupTaskId} ` : '';
+
+  return `${cuPrefix}${commitType}: [${scope}] ${finalText}`;
 }
 
 /**
@@ -946,8 +1017,9 @@ function formatSuccessMessage(params: {
   userId: string;
   commandsRun: string[];
   isFollowUp?: boolean;
+  clickupUrl?: string | null;
 }): string {
-  const { previewUrl, prUrl, branchName, commitHash, analysis, filesChanged, stats, userId, commandsRun, isFollowUp } = params;
+  const { previewUrl, prUrl, branchName, commitHash, analysis, filesChanged, stats, userId, commandsRun, isFollowUp, clickupUrl } = params;
 
   // Truncate analysis for Slack
   const shortAnalysis = analysis.length > 800
@@ -958,10 +1030,12 @@ function formatSuccessMessage(params: {
     ? `✅ *Follow-up Changes Deployed!*`
     : `✅ *Fix Deployed Successfully!*`;
 
+  const clickupLine = clickupUrl ? `\n📋 *ClickUp Ticket:* ${clickupUrl}` : '';
+
   return `${titleText}
 
 🔗 *Preview URL:* ${previewUrl}
-📝 *Pull Request:* ${prUrl}
+📝 *Pull Request:* ${prUrl}${clickupLine}
 🌿 *Branch:* \`${branchName}\`
 📌 *Commit:* \`${commitHash}\`
 
@@ -999,19 +1073,22 @@ function formatPartialSuccessMessage(params: {
   filesChanged: string[];
   stats: { durationMs: number; costUsd: number; turns: number };
   deploymentError?: string;
+  clickupUrl?: string | null;
 }): string {
-  const { prUrl, branchName, analysis, filesChanged, stats, deploymentError } = params;
+  const { prUrl, branchName, analysis, filesChanged, stats, deploymentError, clickupUrl } = params;
 
   const shortAnalysis = analysis.length > 500
     ? analysis.substring(0, 500) + '...'
     : analysis;
+
+  const clickupLine = clickupUrl ? `\n📋 *ClickUp Ticket:* ${clickupUrl}` : '';
 
   return `⚠️ *Partial Success*
 
 ✅ Fix generated and PR created!
 ❌ Deployment preview may still be building
 
-📝 *Pull Request:* ${prUrl}
+📝 *Pull Request:* ${prUrl}${clickupLine}
 🌿 *Branch:* \`${branchName}\`
 
 ---
