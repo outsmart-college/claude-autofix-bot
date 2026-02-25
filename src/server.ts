@@ -211,6 +211,17 @@ app.post('/api/slack-events', async (req: Request, res: Response) => {
     const { channel, text, ts, thread_ts, user, bot_id, subtype, files } = event.data.event;
     const eventType = event.data.event.type;
 
+    // Log ALL incoming events for debugging
+    logger.info('Incoming Slack event', {
+      eventType,
+      channel,
+      user,
+      isThread: !!thread_ts,
+      textPreview: (text || '').substring(0, 80),
+      subtype,
+      bot_id,
+    });
+
     // Filter Out Unwanted Messages
 
     // Process message events AND app_mention events
@@ -298,9 +309,10 @@ app.post('/api/slack-events', async (req: Request, res: Response) => {
       trimmedText = trimmedText.replace(botMentionPattern, '').trim();
     }
 
-    // Ignore very short messages
-    if (trimmedText.length < 10) {
-      logger.debug('Message too short to process', { length: trimmedText.length });
+    // Ignore very short messages (but be lenient for @mention triggers)
+    const minLength = isBotMentioned ? 3 : 10;
+    if (trimmedText.length < minLength) {
+      logger.debug('Message too short to process', { length: trimmedText.length, minLength, isBotMentioned });
       res.status(200).json({ ok: true });
       return;
     }
