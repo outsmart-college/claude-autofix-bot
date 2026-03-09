@@ -304,12 +304,7 @@ app.post('/api/slack-events', async (req: Request, res: Response) => {
       trimmedText = trimmedText.replace(botMentionPattern, '').trim();
     }
 
-    // Ignore very short messages after stripping the @mention
-    if (trimmedText.length < 3) {
-      logger.debug('Message too short to process', { length: trimmedText.length });
-      res.status(200).json({ ok: true });
-      return;
-    }
+    // Any @mention triggers the full pipeline, even without additional text
 
     // Extract PR references from the message
     // Parse default owner/repo from TARGET_REPO_URL for simple #123 references
