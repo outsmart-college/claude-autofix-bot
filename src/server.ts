@@ -274,23 +274,18 @@ app.post('/api/slack-events', async (req: Request, res: Response) => {
     const botMentionPattern = botUserId ? `<@${botUserId}>` : null;
     const isBotMentioned = isAppMentionEvent || (botMentionPattern ? (text || '').includes(botMentionPattern) : false);
 
-    // DUAL TRIGGER LOGIC:
-    // 1. Top-level messages (no thread_ts) in monitored channel → auto-trigger
-    // 2. @claude-autofix-bot mention anywhere (including threads) → on-demand trigger
-    if (isThreadReply && !isBotMentioned) {
-      // Thread reply WITHOUT @mention → ignore
-      logger.debug('Ignoring thread reply (no bot mention)', { threadKey });
+    // TRIGGER LOGIC: Only respond to explicit @mentions (top-level or thread)
+    if (!isBotMentioned) {
+      logger.debug('Ignoring message without bot @mention', { threadKey, isThreadReply });
       res.status(200).json({ ok: true });
       return;
     }
 
-    if (!isThreadReply) {
-      // For new top-level messages: check if we already have an active job
-      if (activeThreads.has(threadKey)) {
-        logger.debug('Thread already has active processing', { threadKey });
-        res.status(200).json({ ok: true });
-        return;
-      }
+    // Check if we already have an active job for this thread
+    if (activeThreads.has(threadKey)) {
+      logger.debug('Thread already has active processing', { threadKey });
+      res.status(200).json({ ok: true });
+      return;
     }
 
     // Only process messages in configured channel
@@ -309,19 +304,9 @@ app.post('/api/slack-events', async (req: Request, res: Response) => {
       trimmedText = trimmedText.replace(botMentionPattern, '').trim();
     }
 
-    // Ignore very short messages (but be lenient for @mention triggers)
-    const minLength = isBotMentioned ? 3 : 10;
-    if (trimmedText.length < minLength) {
-      logger.debug('Message too short to process', { length: trimmedText.length, minLength, isBotMentioned });
-      res.status(200).json({ ok: true });
-      return;
-    }
-
-    // For top-level messages: ignore @mentions to OTHER users/bots (not our bot)
-    // This prevents triggering on messages like "@someone please fix this"
-    // But if our bot was mentioned, we already stripped it above so this won't block it
-    if (!isThreadReply && !isBotMentioned && trimmedText.includes('<@U')) {
-      logger.debug('Ignoring top-level message with @mention to other user');
+    // Ignore very short messages after stripping the @mention
+    if (trimmedText.length < 3) {
+      logger.debug('Message too short to process', { length: trimmedText.length });
       res.status(200).json({ ok: true });
       return;
     }
@@ -383,9 +368,7 @@ app.post('/api/slack-events', async (req: Request, res: Response) => {
     activeThreads.add(job.threadTs);
 
     // Determine trigger type for logging
-    const triggerType = isBotMentioned
-      ? (isThreadReply ? 'mention-in-thread' : 'mention-top-level')
-      : 'auto-top-level';
+    const triggerType = isThreadReply ? 'mention-in-thread' : 'mention-top-level';
 
     logger.success('Job enqueued successfully', {
       jobId: job.id,
