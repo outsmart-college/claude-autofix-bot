@@ -10,6 +10,7 @@ let configError: string | null = null;
 let config: any = null;
 let logger: any = console;
 let jobQueue: any = null;
+let slackService: any = null;
 
 // Try to load configuration
 try {
@@ -28,6 +29,9 @@ try {
 
   const processorModule = await import('./handlers/issue-processor.js');
   jobQueue.setHandler(processorModule.processIssue);
+
+  const slackModule = await import('./services/slack/client.js');
+  slackService = slackModule.slackService;
 } catch (error) {
   configError = error instanceof Error ? error.message : String(error);
   console.error('Failed to load configuration:', configError);
@@ -304,7 +308,35 @@ app.post('/api/slack-events', async (req: Request, res: Response) => {
       trimmedText = trimmedText.replace(botMentionPattern, '').trim();
     }
 
-    // Any @mention triggers the full pipeline, even without additional text
+    // For thread replies: fetch the full thread history as context
+    // The parent message is the main issue, intermediate replies are additional context
+    if (isThreadReply && slackService) {
+      try {
+        const threadMessages = await slackService.getThreadMessages(channel, thread_ts!, ts);
+        if (threadMessages.length > 0) {
+          const parentMessage = threadMessages[0];
+          const intermediateMessages = threadMessages.slice(1);
+
+          let threadContext = `**Main issue:**\n${parentMessage.text}`;
+          if (intermediateMessages.length > 0) {
+            threadContext += `\n\n**Additional context from thread:**\n${intermediateMessages.map((m: any) => `- ${m.text}`).join('\n')}`;
+          }
+          if (trimmedText) {
+            threadContext += `\n\n**Latest instruction:**\n${trimmedText}`;
+          }
+          trimmedText = threadContext;
+          logger.info('Built thread context for @mention', {
+            parentLength: parentMessage.text.length,
+            intermediateCount: intermediateMessages.length,
+            hasLatestInstruction: !!trimmedText,
+          });
+        }
+      } catch (error) {
+        logger.warn('Failed to fetch thread context, using message text only', {
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
 
     // Extract PR references from the message
     // Parse default owner/repo from TARGET_REPO_URL for simple #123 references

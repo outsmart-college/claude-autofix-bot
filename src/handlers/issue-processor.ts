@@ -81,9 +81,16 @@ export async function processIssue(job: IssueJob): Promise<JobResult> {
             ? 'low'
             : 'normal';
 
-      // Use first line of text as summary (clean it up)
-      const summary = text.split(/[\r\n]/)[0]
-        .replace(/[^\w\s\-.,!?'"()]/g, '')
+      // Extract the core issue text for a concise title
+      // If text has thread context format, pull the main issue line; otherwise use first line
+      let rawIssue = text;
+      const mainIssueMatch = text.match(/\*\*Main issue:\*\*\n([\s\S]*?)(?:\n\n\*\*|$)/);
+      if (mainIssueMatch) {
+        rawIssue = mainIssueMatch[1].trim();
+      }
+      const summary = rawIssue.split(/[\r\n]/)[0]
+        .replace(/<@U[A-Z0-9]+>/g, '')     // Strip @mentions
+        .replace(/[^\w\s\-.,!?'"()#]/g, '') // Strip special chars
         .replace(/\s+/g, ' ')
         .trim()
         .substring(0, 80) || 'Bug report from Slack';

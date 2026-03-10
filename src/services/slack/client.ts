@@ -160,6 +160,61 @@ class SlackService {
   }
 
   /**
+   * Fetch all messages in a thread (parent + replies)
+   *
+   * Returns human messages in chronological order, excluding bot messages.
+   * Used to build full thread context when the bot is @mentioned in a thread.
+   */
+  async getThreadMessages(
+    channel: string,
+    threadTs: string,
+    excludeTs?: string
+  ): Promise<{ user: string; text: string; ts: string }[]> {
+    try {
+      logger.debug('Fetching thread messages', { channel, threadTs });
+
+      const result = await this.client.conversations.replies({
+        channel,
+        ts: threadTs,
+        limit: 100,
+        inclusive: true, // Include the parent message
+      });
+
+      if (!result.ok || !result.messages) {
+        logger.warn('Failed to fetch thread messages', { error: result.error });
+        return [];
+      }
+
+      // Filter to human messages only (exclude bot messages and optionally the trigger message)
+      const humanMessages = result.messages
+        .filter((msg: any) => {
+          if (msg.bot_id || msg.subtype === 'bot_message') return false;
+          if (excludeTs && msg.ts === excludeTs) return false;
+          return true;
+        })
+        .map((msg: any) => ({
+          user: msg.user || 'unknown',
+          text: msg.text || '',
+          ts: msg.ts,
+        }));
+
+      logger.debug('Thread messages fetched', {
+        total: result.messages.length,
+        human: humanMessages.length,
+      });
+
+      return humanMessages;
+    } catch (error) {
+      logger.error('Failed to fetch thread messages', {
+        error: error instanceof Error ? error.message : String(error),
+        channel,
+        threadTs,
+      });
+      return [];
+    }
+  }
+
+  /**
    * Download images from Slack private URLs
    *
    * Slack files require authentication via the bot token.
