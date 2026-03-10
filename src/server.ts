@@ -128,6 +128,8 @@ app.get('/api/health', (_req: Request, res: Response) => {
     slack: {
       configured: !!config?.slack?.botToken && !!config?.slack?.signingSecret,
       channelMonitored: !!config?.slack?.channelId,
+      channelId: config?.slack?.channelId || 'not set',
+      botUserId: config?.slack?.botUserId || 'not set',
     },
     claude: {
       configured: !!config?.claude?.apiKey,
