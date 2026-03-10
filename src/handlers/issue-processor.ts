@@ -1,4 +1,4 @@
-import { IssueJob, JobResult, BranchOptions, AgentProgress, ImageAttachment, ThreadContext } from '../types/index.js';
+import { IssueJob, JobResult, BranchOptions, AgentProgress, ImageAttachment, ThreadContext, DeploymentResult } from '../types/index.js';
 import { logger } from '../utils/logger.js';
 import { slackService } from '../services/slack/client.js';
 import { claudeAgentSDKService } from '../services/claude/agent-sdk.js';
@@ -438,9 +438,15 @@ Please make the requested changes on the existing branch. The changes will be co
       );
 
       const branchType = determineBranchType(text);
+      // Extract the raw issue text for branch naming (strip thread context formatting)
+      let branchDescription = text;
+      const branchIssueMatch = text.match(/\*\*Main issue:\*\*\n([\s\S]*?)(?:\n\n\*\*|$)/);
+      if (branchIssueMatch) {
+        branchDescription = branchIssueMatch[1].trim();
+      }
       const branchOptions: BranchOptions = {
         type: branchType,
-        description: text.substring(0, 50),
+        description: branchDescription.substring(0, 50),
       };
 
       const branchResult = await gitAutomationService.createBranch(branchOptions, clickupTicket);
@@ -619,44 +625,34 @@ Please make the requested changes on the existing branch. The changes will be co
     }
 
     // ============================================
-    // STEP 9: Wait for Deployment
+    // STEP 9: Wait for Deployment (skip if not configured)
     // ============================================
-    logger.info('🚀 Waiting for deployment');
-    const prStatusText = isFollowUp && threadContext
-      ? `✅ Changes pushed to existing PR!`
-      : `✅ Pull request created!`;
-    await slackService.updateMessage(
-      channel,
-      statusMessageTs,
-      `🚀 *Deploying preview...*\n\n` +
-      `${prStatusText}\n` +
-      `📝 PR: ${finalPrUrl}\n\n` +
-      `⏳ Waiting for preview deployment (this may take 2-5 minutes)...`
-    );
+    let deployment: DeploymentResult;
 
-    // Try Vercel API first, then fall back to GitHub PR comments for any preview URL
-    let deployment = await vercelDeploymentService.waitForDeployment(branchName, 5);
+    const vercelConfigured = !!(config.deployment.vercelToken && config.deployment.vercelProjectId);
 
-    // If Vercel API returned placeholder URL (credentials not configured),
-    // try to get the actual preview URL from GitHub PR comments (supports Vercel, Cloudflare Pages, etc.)
-    if (deployment.success && deployment.url === 'https://vercel-auto-deploy.example.com' && finalPrNumber) {
-      logger.info('Vercel API not configured, checking PR comments for preview URL...');
+    if (vercelConfigured) {
+      logger.info('🚀 Waiting for deployment');
+      const prStatusText = isFollowUp && threadContext
+        ? `✅ Changes pushed to existing PR!`
+        : `✅ Pull request created!`;
+      await slackService.updateMessage(
+        channel,
+        statusMessageTs,
+        `🚀 *Deploying preview...*\n\n` +
+        `${prStatusText}\n` +
+        `📝 PR: ${finalPrUrl}\n\n` +
+        `⏳ Waiting for preview deployment (this may take 2-5 minutes)...`
+      );
 
-      const previewUrl = await githubAPIService.getPreviewUrlFromComments(finalPrNumber, 5);
-
-      if (previewUrl) {
-        deployment = {
-          success: true,
-          url: previewUrl,
-          status: 'READY',
-        };
-      } else {
-        // No preview URL found in comments either
-        deployment = {
-          success: false,
-          error: 'Preview URL not found in PR comments or deployment statuses',
-        };
-      }
+      deployment = await vercelDeploymentService.waitForDeployment(branchName, 5);
+    } else {
+      // No deployment service configured — skip waiting entirely
+      logger.info('No deployment service configured, skipping preview wait');
+      deployment = {
+        success: false,
+        error: 'No deployment service configured',
+      };
     }
 
     // ============================================
