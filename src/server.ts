@@ -38,7 +38,7 @@ try {
 }
 
 // Import types (these don't depend on config)
-import { SlackEventSchema, SlackVerificationSchema, IssueJob, ImageAttachment } from './types/index.js';
+import { SlackEventSchema, SlackVerificationSchema, IssueJob, ImageAttachment, AutofixMode } from './types/index.js';
 import { extractPRReferences, PRReference } from './utils/pr-references.js';
 import {
   processedMessages,
@@ -310,6 +310,24 @@ app.post('/api/slack-events', async (req: Request, res: Response) => {
       trimmedText = trimmedText.replace(botMentionPattern, '').trim();
     }
 
+    // Parse mode keyword from message:
+    //   "ticket and pr" → full (create both ClickUp ticket and PR)
+    //   "ticket" → ticket-only (create ClickUp ticket, no PR)
+    //   "pr" → pr-only (create PR, skip ClickUp)
+    //   anything else → default full (both)
+    let mode: AutofixMode = 'full';
+    const ticketAndPrMatch = trimmedText.match(/^ticket\s+and\s+pr(?::?\s*)(.*)/is);
+    const singleModeMatch = trimmedText.match(/^(ticket|pr)(?::?\s*)(.*)/is);
+    if (ticketAndPrMatch) {
+      mode = 'full';
+      trimmedText = (ticketAndPrMatch[1] || '').trim();
+      logger.info('Mode keyword detected', { mode, remainingText: trimmedText.substring(0, 80) });
+    } else if (singleModeMatch) {
+      mode = singleModeMatch[1].toLowerCase() === 'ticket' ? 'ticket-only' : 'pr-only';
+      trimmedText = (singleModeMatch[2] || '').trim();
+      logger.info('Mode keyword detected', { mode, remainingText: trimmedText.substring(0, 80) });
+    }
+
     // For thread replies: fetch the full thread history as context
     // The parent message is the main issue, intermediate replies are additional context
     if (isThreadReply && slackService) {
@@ -383,6 +401,7 @@ app.post('/api/slack-events', async (req: Request, res: Response) => {
       userId: user,
       timestamp: new Date(),
       retryCount: 0,
+      mode,
       isFollowUp,
       prReferences: prReferences.length > 0 ? prReferences : undefined,
       images: imageAttachments.length > 0 ? imageAttachments : undefined,

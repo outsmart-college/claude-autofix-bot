@@ -26,6 +26,7 @@ import { clickupService, type ClickUpTicket } from '../services/clickup/client.j
  */
 export async function processIssue(job: IssueJob): Promise<JobResult> {
   const { text, channel, threadTs, userId, isFollowUp, threadContext } = job;
+  const mode = job.mode || 'full';
   let statusMessageTs: string | undefined;
   let branchName: string | undefined;
   let prUrl: string | undefined;
@@ -68,7 +69,7 @@ export async function processIssue(job: IssueJob): Promise<JobResult> {
     // ============================================
     // STEP 1.5: Create ClickUp Ticket (before any git work)
     // ============================================
-    if (!isFollowUp) {
+    if (!isFollowUp && mode !== 'pr-only') {
       logger.info('📋 Creating ClickUp ticket...');
       const slackPermalink = `https://slack.com/archives/${channel}/p${threadTs.replace('.', '')}`;
 
@@ -108,6 +109,29 @@ export async function processIssue(job: IssueJob): Promise<JobResult> {
       } else {
         logger.warn('ClickUp ticket creation failed — continuing without it');
       }
+    }
+
+    // ============================================
+    // TICKET-ONLY MODE: Create ticket and stop
+    // ============================================
+    if (mode === 'ticket-only') {
+      const ticketMsg = clickupTicket
+        ? `📋 *ClickUp Ticket Created!*\n\n` +
+          `🔗 *Ticket:* ${clickupTicket.url}\n` +
+          `📝 *Summary:* ${text.substring(0, 200)}\n\n` +
+          `_No PR was created (ticket-only mode)._`
+        : `❌ *Failed to create ClickUp ticket.*\n\nPlease try again or create one manually.`;
+
+      await slackService.updateMessage(channel, statusMessageTs!, ticketMsg);
+      await slackService.addReaction(channel, threadTs, clickupTicket ? 'white_check_mark' : 'warning');
+
+      markThreadCompleted(threadTs);
+
+      return {
+        jobId: job.id,
+        status: clickupTicket ? 'completed' : 'failed',
+        error: clickupTicket ? undefined : 'ClickUp ticket creation failed',
+      };
     }
 
     // ============================================

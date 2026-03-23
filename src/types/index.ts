@@ -140,6 +140,7 @@ export interface IssueJob {
   userId: string;
   timestamp: Date;
   retryCount?: number;
+  mode?: AutofixMode;  // Processing mode: 'full' (default), 'ticket-only', or 'pr-only'
   isFollowUp?: boolean;  // True if this is a follow-up instruction in an existing thread
   prReferences?: PRReferenceInfo[];  // PR references extracted from message
   images?: ImageAttachment[];  // Image attachments (screenshots, etc.)
@@ -160,6 +161,14 @@ export interface PRReferenceInfo {
   repo: string;
   prNumber: number;
 }
+
+/**
+ * Processing mode for autofix jobs:
+ * - 'full': Create ClickUp ticket + PR (default)
+ * - 'ticket-only': Only create ClickUp ticket, no git/PR work
+ * - 'pr-only': Only create PR, skip ClickUp ticket
+ */
+export type AutofixMode = 'full' | 'ticket-only' | 'pr-only';
 
 export type JobStatus = 'pending' | 'processing' | 'completed' | 'failed';
 
