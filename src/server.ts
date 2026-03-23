@@ -264,11 +264,14 @@ app.post('/api/slack-events', async (req: Request, res: Response) => {
     }
 
     // Check if we've already processed this specific message (prevent duplicates)
+    // Mark immediately to prevent race conditions from concurrent Slack events
+    // (Slack sends both 'message' and 'app_mention' events for @mentions)
     if (processedMessages.has(ts)) {
       logger.debug('Message already processed', { ts });
       res.status(200).json({ ok: true });
       return;
     }
+    processedMessages.add(ts);
 
     // Determine if this is a thread reply vs a new top-level message
     const isThreadReply = !!(thread_ts && thread_ts !== ts);
@@ -411,8 +414,7 @@ app.post('/api/slack-events', async (req: Request, res: Response) => {
     // Queue the job for background processing
     await jobQueue.enqueue(job);
 
-    // Mark message and thread as being processed to prevent duplicates
-    processedMessages.add(ts);
+    // Mark thread as active to prevent overlapping jobs on the same thread
     activeThreads.add(job.threadTs);
 
     // Determine trigger type for logging
