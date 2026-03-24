@@ -1,3 +1,4 @@
+import Anthropic from '@anthropic-ai/sdk';
 import { config } from '../../config/index.js';
 import { logger } from '../../utils/logger.js';
 
@@ -35,12 +36,59 @@ class ClickUpService {
    * Returns the ticket with id/url/name, or null if creation fails.
    * Failures are logged but never thrown — callers should handle null gracefully.
    */
+  /**
+   * Use Claude to summarize raw Slack thread context into a clean bug description.
+   * Filters out bot-debugging chatter and @mentions, focuses on the actual bug.
+   */
+  private async summarizeThreadContext(rawText: string): Promise<{ title: string; description: string }> {
+    try {
+      const anthropic = new Anthropic({ apiKey: config.claude.apiKey });
+      const response = await anthropic.messages.create({
+        model: 'claude-sonnet-4-20250514',
+        max_tokens: 300,
+        messages: [{
+          role: 'user',
+          content: `You are summarizing a Slack bug report thread for a ClickUp ticket. The thread may contain:
+- The original bug report (the most important part)
+- Debugging discussion between team members (less important)
+- Bot commands and meta-discussion about tooling (ignore these)
+
+Extract ONLY information relevant to the actual bug being reported. Ignore any discussion about bots, tooling, API keys, or debugging the reporting process itself.
+
+Strip all Slack @mentions (like <@U12345>) and replace with generic references if needed.
+
+Return your response in this exact format:
+TITLE: [A concise bug title, max 60 chars, no prefix like "Bug:"]
+DESCRIPTION: [A clean 1-3 sentence description of the bug, what happened, and any reproduction steps mentioned]
+
+Here is the raw Slack thread:
+${rawText.substring(0, 1500)}`,
+        }],
+      });
+
+      const text = response.content[0].type === 'text' ? response.content[0].text : '';
+      const titleMatch = text.match(/TITLE:\s*(.+)/);
+      const descMatch = text.match(/DESCRIPTION:\s*([\s\S]+)/);
+
+      return {
+        title: titleMatch?.[1]?.trim().substring(0, 80) || '',
+        description: descMatch?.[1]?.trim() || '',
+      };
+    } catch (error) {
+      logger.warn('Failed to summarize thread with Claude, using raw text', {
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return { title: '', description: '' };
+    }
+  }
+
   async createBugTicket(params: {
     summary: string;
     slackText: string;
     reporterName: string;
     slackPermalink: string;
     severity: 'normal' | 'high' | 'low';
+    mode?: 'ticket-only' | 'pr-only' | 'full';
   }): Promise<ClickUpTicket | null> {
     if (!config.clickup.apiKey) {
       logger.info('ClickUp API key not configured — skipping ticket creation');
@@ -48,18 +96,24 @@ class ClickUpService {
     }
 
     try {
-      const { summary, slackText, reporterName, slackPermalink, severity } = params;
+      const { summary, slackText, reporterName, slackPermalink, severity, mode = 'full' } = params;
 
-      const taskName = `Bug: ${summary}`;
+      // Use Claude to generate a clean summary from raw thread context
+      const ai = await this.summarizeThreadContext(slackText);
+      const taskName = `Bug: ${ai.title || summary}`;
+      const cleanDescription = ai.description || slackText.substring(0, 500);
       const dateStr = new Date().toISOString().split('T')[0];
 
-      const markdownDescription = `**Description:** ${slackText.substring(0, 500)}
+      let markdownDescription = `**Description:** ${cleanDescription}
 
 **Reporter:** ${reporterName} via Slack on ${dateStr}
 
-**Slack Thread:** ${slackPermalink}
+**Slack Thread:** ${slackPermalink}`;
 
-**Autofix Status:** Fix in progress — PR will be linked automatically.`;
+      // Only show autofix status if a PR will be created
+      if (mode === 'full') {
+        markdownDescription += `\n\n**Autofix Status:** Fix in progress — PR will be linked automatically.`;
+      }
 
       const priority = severity === 'high' ? 2 : severity === 'low' ? 4 : 3;
 

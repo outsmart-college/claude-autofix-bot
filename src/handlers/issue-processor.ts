@@ -102,6 +102,7 @@ export async function processIssue(job: IssueJob): Promise<JobResult> {
         reporterName: userId ? `<@${userId}>` : 'Unknown',
         slackPermalink,
         severity,
+        mode,
       });
 
       if (clickupTicket) {
