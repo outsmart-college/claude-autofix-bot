@@ -53,7 +53,7 @@ export async function processIssue(job: IssueJob): Promise<JobResult> {
     // ============================================
     // STEP 1: Acknowledge in Slack
     // ============================================
-    await slackService.addReaction(channel, threadTs, 'eyes');
+    // Note: 👀 eyes emoji is now added via ClickUp webhook when task moves to "in progress"
 
     const initialMessage = isFollowUp && threadContext
       ? `🔧 *Processing follow-up request...*\nContinuing work on branch \`${branchName}\`.`
@@ -106,6 +106,8 @@ export async function processIssue(job: IssueJob): Promise<JobResult> {
 
       if (clickupTicket) {
         logger.info('ClickUp ticket created', { id: clickupTicket.id, url: clickupTicket.url });
+        // Add ticket emoji to indicate a ClickUp ticket was created
+        await slackService.addReaction(channel, threadTs, 'ticket');
       } else {
         logger.warn('ClickUp ticket creation failed — continuing without it');
       }
@@ -123,7 +125,7 @@ export async function processIssue(job: IssueJob): Promise<JobResult> {
         : `❌ *Failed to create ClickUp ticket.*\n\nPlease try again or create one manually.`;
 
       await slackService.updateMessage(channel, statusMessageTs!, ticketMsg);
-      await slackService.addReaction(channel, threadTs, clickupTicket ? 'white_check_mark' : 'warning');
+      await slackService.addReaction(channel, threadTs, clickupTicket ? 'ticket' : 'warning');
 
       markThreadCompleted(threadTs);
 
@@ -707,7 +709,7 @@ Please make the requested changes on the existing branch. The changes will be co
       });
 
       await slackService.updateMessage(channel, statusMessageTs, successMessage);
-      await slackService.addReaction(channel, threadTs, 'white_check_mark');
+      await slackService.addReaction(channel, threadTs, 'wrench');
 
       logger.info('Issue processing completed successfully!', {
         jobId: job.id,

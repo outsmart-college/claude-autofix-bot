@@ -171,8 +171,78 @@ app.get('/', (_req: Request, res: Response) => {
     endpoints: {
       health: '/api/health',
       slack: '/api/slack-events',
+      clickup: '/api/clickup-webhook',
     },
   });
+});
+
+/**
+ * ClickUp Webhook handler — reacts with ✅ when a task is marked complete.
+ *
+ * Set up in ClickUp: Settings → Webhooks → add endpoint URL:
+ *   https://your-app.up.railway.app/api/clickup-webhook
+ * Subscribe to event: "taskStatusUpdated"
+ */
+app.post('/api/clickup-webhook', async (req: Request, res: Response) => {
+  // Respond immediately to ClickUp
+  res.status(200).json({ ok: true });
+
+  try {
+    const { event, task_id } = req.body;
+
+    // Only care about status changes we track
+    const newStatus = req.body?.history_items?.[0]?.after?.status?.toLowerCase?.();
+    if (event !== 'taskStatusUpdated' || !newStatus) return;
+
+    // Map ClickUp statuses to Slack emoji reactions
+    const statusEmojiMap: Record<string, string> = {
+      'in progress': 'eyes',           // 👀 someone is working on it
+      'complete': 'white_check_mark',   // ✅ done
+      'closed': 'white_check_mark',     // ✅ done
+    };
+    const emoji = statusEmojiMap[newStatus];
+    if (!emoji) return;
+
+    logger.info('ClickUp task status changed', { taskId: task_id, newStatus, emoji });
+
+    if (!slackService || !config) return;
+
+    // Fetch the task to get the Slack permalink from the description
+    const clickupResp = await fetch(`https://api.clickup.com/api/v2/task/${task_id}`, {
+      headers: {
+        Authorization: config.clickup.apiKey,
+        'Content-Type': 'application/json',
+      },
+    });
+
+    if (!clickupResp.ok) {
+      logger.warn('Failed to fetch completed ClickUp task', { taskId: task_id });
+      return;
+    }
+
+    const taskData = (await clickupResp.json()) as { description?: string; markdown_description?: string };
+    const desc = taskData.markdown_description || taskData.description || '';
+
+    // Extract Slack permalink: https://slack.com/archives/C.../p...
+    const slackMatch = desc.match(/https:\/\/[a-z0-9.-]*slack\.com\/archives\/(C[A-Z0-9]+)\/p(\d+)/);
+    if (!slackMatch) {
+      logger.debug('No Slack permalink found in completed ClickUp task', { taskId: task_id });
+      return;
+    }
+
+    const [, slackChannel, rawTs] = slackMatch;
+    // Convert permalink timestamp (e.g. "1234567890123456") to Slack ts format ("1234567890.123456")
+    const slackTs = rawTs.length > 10
+      ? rawTs.slice(0, 10) + '.' + rawTs.slice(10)
+      : rawTs;
+
+    await slackService.addReaction(slackChannel, slackTs, emoji);
+    logger.info(`Added :${emoji}: reaction for ClickUp status change`, { taskId: task_id, newStatus, slackChannel, slackTs });
+  } catch (error) {
+    logger.warn('Error processing ClickUp webhook', {
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
 });
 
 /**
