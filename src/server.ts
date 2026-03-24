@@ -297,11 +297,15 @@ app.post('/api/slack-events', async (req: Request, res: Response) => {
       return;
     }
 
-    // Only process messages in configured channel
-    if (channel !== config.slack.channelId) {
-      logger.debug('Message not in monitored channel', {
+    // Only process messages in allowed channels (if configured)
+    // Empty channelId means all channels are allowed
+    const allowedChannels = config.slack.channelId
+      ? config.slack.channelId.split(',').map((c: string) => c.trim())
+      : [];
+    if (allowedChannels.length > 0 && !allowedChannels.includes(channel)) {
+      logger.debug('Message not in allowed channel', {
         channel,
-        expected: config.slack.channelId,
+        allowedChannels,
       });
       res.status(200).json({ ok: true });
       return;

@@ -14,9 +14,7 @@ const ConfigSchema = z.object({
     signingSecret: z.string().min(1, {
       message: 'Slack signing secret is required. Get it from Basic Information.',
     }),
-    channelId: z.string().startsWith('C', {
-      message: 'Slack channel ID must start with C. Right-click channel → View details.',
-    }),
+    channelId: z.string().default(''),  // Comma-separated channel IDs, or empty to allow all channels
     botUserId: z.string().startsWith('U', {
       message: 'Slack bot user ID must start with U. Find it in the bot\'s app profile.',
     }).optional(),
