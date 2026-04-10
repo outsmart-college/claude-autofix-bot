@@ -212,6 +212,7 @@ export interface Config {
   clickup: {
     apiKey: string;
     listId: string;
+    channelListMap: Record<string, string>;
   };
   deployment: {
     vercelToken?: string;

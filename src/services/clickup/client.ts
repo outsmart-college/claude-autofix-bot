@@ -89,6 +89,7 @@ ${rawText.substring(0, 1500)}`,
     slackPermalink: string;
     severity: 'normal' | 'high' | 'low';
     mode?: 'ticket-only' | 'pr-only' | 'full';
+    channelId?: string;
   }): Promise<ClickUpTicket | null> {
     if (!config.clickup.apiKey) {
       logger.info('ClickUp API key not configured — skipping ticket creation');
@@ -96,7 +97,11 @@ ${rawText.substring(0, 1500)}`,
     }
 
     try {
-      const { summary, slackText, reporterName, slackPermalink, severity, mode = 'full' } = params;
+      const { summary, slackText, reporterName, slackPermalink, severity, mode = 'full', channelId } = params;
+
+      // Resolve the ClickUp list: channel-specific mapping takes priority, then default
+      const listId = (channelId && config.clickup.channelListMap[channelId]) || config.clickup.listId;
+      logger.info('Resolved ClickUp list', { channelId, listId, isChannelSpecific: !!(channelId && config.clickup.channelListMap[channelId]) });
 
       // Use Claude to generate a clean summary from raw thread context
       const ai = await this.summarizeThreadContext(slackText);
@@ -117,7 +122,7 @@ ${rawText.substring(0, 1500)}`,
 
       const priority = severity === 'high' ? 2 : severity === 'low' ? 4 : 3;
 
-      const response = await fetch(`${this.baseUrl}/list/${config.clickup.listId}/task`, {
+      const response = await fetch(`${this.baseUrl}/list/${listId}/task`, {
         method: 'POST',
         headers: this.headers,
         body: JSON.stringify({

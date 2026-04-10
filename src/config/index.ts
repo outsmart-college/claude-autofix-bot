@@ -49,6 +49,7 @@ const ConfigSchema = z.object({
   clickup: z.object({
     apiKey: z.string().default(''),
     listId: z.string().default('901324441486'),
+    channelListMap: z.record(z.string(), z.string()).default({}),
   }),
   deployment: z.object({
     vercelToken: z.string().optional(),
@@ -59,6 +60,22 @@ const ConfigSchema = z.object({
   logLevel: z.enum(['debug', 'info', 'warn', 'error']).default('info'),
   featureFlags: z.array(z.string()).default([]),
 });
+
+/**
+ * Parse CLICKUP_CHANNEL_MAP env var.
+ * Format: "C08J8CD1RV5:901324441486,C09E1QSB335:901324441487"
+ */
+function parseChannelListMap(raw: string): Record<string, string> {
+  if (!raw.trim()) return {};
+  const map: Record<string, string> = {};
+  for (const pair of raw.split(',')) {
+    const [channelId, listId] = pair.trim().split(':');
+    if (channelId && listId) {
+      map[channelId.trim()] = listId.trim();
+    }
+  }
+  return map;
+}
 
 function loadConfig(): Config {
   const rawConfig = {
@@ -86,6 +103,7 @@ function loadConfig(): Config {
     clickup: {
       apiKey: process.env.CLICKUP_API_KEY || '',
       listId: process.env.CLICKUP_LIST_ID || '901324441486',
+      channelListMap: parseChannelListMap(process.env.CLICKUP_CHANNEL_MAP || ''),
     },
     deployment: {
       vercelToken: process.env.VERCEL_TOKEN,

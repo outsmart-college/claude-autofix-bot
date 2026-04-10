@@ -103,6 +103,7 @@ export async function processIssue(job: IssueJob): Promise<JobResult> {
         slackPermalink,
         severity,
         mode,
+        channelId: channel,
       });
 
       if (clickupTicket) {
