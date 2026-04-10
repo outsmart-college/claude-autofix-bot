@@ -1,6 +1,7 @@
 import Anthropic from '@anthropic-ai/sdk';
 import { config } from '../../config/index.js';
 import { logger } from '../../utils/logger.js';
+import { ImageAttachment } from '../../types/index.js';
 
 export interface ClickUpTicket {
   id: string;
@@ -198,6 +199,62 @@ ${rawText.substring(0, 1500)}`,
       logger.warn('Exception updating ClickUp task with PR link', {
         error: error instanceof Error ? error.message : String(error),
       });
+    }
+  }
+
+  /**
+   * Download images from Slack and attach them to a ClickUp task.
+   * Uses the ClickUp attachment API with multipart form upload.
+   */
+  async attachImages(taskId: string, images: ImageAttachment[]): Promise<void> {
+    if (!config.clickup.apiKey || images.length === 0) return;
+
+    for (const image of images) {
+      try {
+        // Download from Slack using bot token
+        const slackResp = await fetch(image.url, {
+          headers: { 'Authorization': `Bearer ${config.slack.botToken}` },
+        });
+
+        if (!slackResp.ok) {
+          logger.warn('Failed to download image from Slack for ClickUp', {
+            filename: image.filename,
+            status: slackResp.status,
+          });
+          continue;
+        }
+
+        const arrayBuffer = await slackResp.arrayBuffer();
+        const blob = new Blob([arrayBuffer], { type: image.mimetype });
+
+        // Upload to ClickUp as task attachment
+        const formData = new FormData();
+        formData.append('attachment', blob, image.filename);
+
+        const clickupResp = await fetch(`${this.baseUrl}/task/${taskId}/attachment`, {
+          method: 'POST',
+          headers: { 'Authorization': config.clickup.apiKey },
+          body: formData,
+        });
+
+        if (clickupResp.ok) {
+          logger.info('Image attached to ClickUp task', { taskId, filename: image.filename });
+        } else {
+          const errText = await clickupResp.text();
+          logger.warn('Failed to attach image to ClickUp task', {
+            taskId,
+            filename: image.filename,
+            status: clickupResp.status,
+            error: errText,
+          });
+        }
+      } catch (error) {
+        logger.warn('Exception attaching image to ClickUp', {
+          taskId,
+          filename: image.filename,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
     }
   }
 

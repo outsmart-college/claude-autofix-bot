@@ -110,6 +110,15 @@ export async function processIssue(job: IssueJob): Promise<JobResult> {
         logger.info('ClickUp ticket created', { id: clickupTicket.id, url: clickupTicket.url });
         // Add ticket emoji to indicate a ClickUp ticket was created
         await slackService.addReaction(channel, threadTs, 'ticket');
+
+        // Attach images from the Slack thread to the ClickUp ticket (non-blocking)
+        if (job.images && job.images.length > 0) {
+          clickupService.attachImages(clickupTicket.id, job.images).catch((err) => {
+            logger.warn('Failed to attach images to ClickUp ticket', {
+              error: err instanceof Error ? err.message : String(err),
+            });
+          });
+        }
       } else {
         logger.warn('ClickUp ticket creation failed — continuing without it');
       }
