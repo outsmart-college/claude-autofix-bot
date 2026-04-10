@@ -405,8 +405,12 @@ app.post('/api/slack-events', async (req: Request, res: Response) => {
       logger.info('Mode keyword detected', { mode, remainingText: trimmedText.substring(0, 80) });
     }
 
+    // Collect image attachments from the trigger message and thread history
+    const imageAttachments: ImageAttachment[] = [];
+
     // For thread replies: fetch the full thread history as context
     // The parent message is the main issue, intermediate replies are additional context
+    // Also collect any image attachments from thread messages
     if (isThreadReply && slackService) {
       try {
         const threadMessages = await slackService.getThreadMessages(channel, thread_ts!, ts);
@@ -422,10 +426,25 @@ app.post('/api/slack-events', async (req: Request, res: Response) => {
             threadContext += `\n\n**Latest instruction:**\n${trimmedText}`;
           }
           trimmedText = threadContext;
+
+          // Collect image attachments from all thread messages
+          for (const msg of threadMessages) {
+            if (msg.files) {
+              for (const file of msg.files) {
+                imageAttachments.push({
+                  url: file.url,
+                  filename: file.filename,
+                  mimetype: file.mimetype,
+                });
+              }
+            }
+          }
+
           logger.info('Built thread context for @mention', {
             parentLength: parentMessage.text.length,
             intermediateCount: intermediateMessages.length,
             hasLatestInstruction: !!trimmedText,
+            threadImages: imageAttachments.length,
           });
         }
       } catch (error) {
@@ -442,9 +461,7 @@ app.post('/api/slack-events', async (req: Request, res: Response) => {
     const defaultRepo = repoUrlMatch?.[2] || 'repo';
     const prReferences = extractPRReferences(trimmedText, defaultOwner, defaultRepo);
 
-    // Extract image attachments (screenshots, etc.)
-    // Only include image types that Claude can process
-    const imageAttachments: ImageAttachment[] = [];
+    // Extract image attachments from the trigger message itself
     if (files && files.length > 0) {
       for (const file of files) {
         // Only include image files

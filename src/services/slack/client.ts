@@ -169,7 +169,7 @@ class SlackService {
     channel: string,
     threadTs: string,
     excludeTs?: string
-  ): Promise<{ user: string; text: string; ts: string }[]> {
+  ): Promise<{ user: string; text: string; ts: string; files?: { url: string; filename: string; mimetype: string }[] }[]> {
     try {
       logger.debug('Fetching thread messages', { channel, threadTs });
 
@@ -192,11 +192,27 @@ class SlackService {
           if (excludeTs && msg.ts === excludeTs) return false;
           return true;
         })
-        .map((msg: any) => ({
-          user: msg.user || 'unknown',
-          text: msg.text || '',
-          ts: msg.ts,
-        }));
+        .map((msg: any) => {
+          const mapped: { user: string; text: string; ts: string; files?: { url: string; filename: string; mimetype: string }[] } = {
+            user: msg.user || 'unknown',
+            text: msg.text || '',
+            ts: msg.ts,
+          };
+          // Include image file attachments if present
+          if (msg.files && msg.files.length > 0) {
+            const imageFiles = msg.files
+              .filter((f: any) => f.mimetype && f.mimetype.startsWith('image/'))
+              .map((f: any) => ({
+                url: f.url_private,
+                filename: f.name,
+                mimetype: f.mimetype,
+              }));
+            if (imageFiles.length > 0) {
+              mapped.files = imageFiles;
+            }
+          }
+          return mapped;
+        });
 
       logger.debug('Thread messages fetched', {
         total: result.messages.length,
