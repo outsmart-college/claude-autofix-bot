@@ -388,13 +388,13 @@ app.post('/api/slack-events', async (req: Request, res: Response) => {
     }
 
     // Parse mode keyword from message:
-    //   "ticket and pr" → full (create both ClickUp ticket and PR)
-    //   "ticket" → ticket-only (create ClickUp ticket, no PR)
-    //   "pr" → pr-only (create PR, skip ClickUp)
+    //   "ticket and pr" / "create ticket and pr" → full (create both ClickUp ticket and PR)
+    //   "ticket" / "create ticket" → ticket-only (create ClickUp ticket, no PR)
+    //   "pr" / "create pr" / "fix" → pr-only (create PR, skip ClickUp)
     //   anything else → default full (both)
     let mode: AutofixMode = 'full';
-    const ticketAndPrMatch = trimmedText.match(/^ticket\s+and\s+pr(?::?\s*)(.*)/is);
-    const singleModeMatch = trimmedText.match(/^(ticket|pr)(?::?\s*)(.*)/is);
+    const ticketAndPrMatch = trimmedText.match(/^(?:create\s+)?ticket\s+and\s+(?:create\s+)?pr(?::?\s*)(.*)/is);
+    const singleModeMatch = trimmedText.match(/^(?:create\s+)?(?:a\s+)?(ticket|pr|fix)(?::?\s*)(.*)/is);
     if (ticketAndPrMatch) {
       mode = 'full';
       trimmedText = (ticketAndPrMatch[1] || '').trim();
